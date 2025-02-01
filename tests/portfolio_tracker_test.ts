@@ -8,7 +8,7 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-    name: "Can create a new portfolio",
+    name: "Can create a new portfolio with analytics",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const wallet1 = accounts.get('wallet_1')!;
         
@@ -19,11 +19,21 @@ Clarinet.test({
         ]);
         
         block.receipts[0].result.expectOk().expectUint(1);
+        
+        let getPortfolio = chain.mineBlock([
+            Tx.contractCall('portfolio-tracker', 'get-portfolio', [
+                types.uint(1)
+            ], wallet1.address)
+        ]);
+        
+        const portfolio = getPortfolio.receipts[0].result.expectSome().expectTuple();
+        assertEquals(portfolio['total-value'], types.uint(0));
+        assertEquals(portfolio['profit-loss'], types.int(0));
     }
 });
 
 Clarinet.test({
-    name: "Can add holdings to portfolio",
+    name: "Can track portfolio value and profit/loss",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const wallet1 = accounts.get('wallet_1')!;
         
@@ -39,8 +49,7 @@ Clarinet.test({
             ], wallet1.address)
         ]);
         
-        block.receipts[0].result.expectOk();
-        block.receipts[1].result.expectOk();
+        block.receipts.map(receipt => receipt.result.expectOk());
         
         let getHolding = chain.mineBlock([
             Tx.contractCall('portfolio-tracker', 'get-holding', [
@@ -50,42 +59,29 @@ Clarinet.test({
         ]);
         
         const holding = getHolding.receipts[0].result.expectSome().expectTuple();
-        assertEquals(holding['amount'], types.uint(100000000));
-        assertEquals(holding['avg-price'], types.uint(50000000000));
-    }
-});
-
-Clarinet.test({
-    name: "Can record transactions",
-    async fn(chain: Chain, accounts: Map<string, Account>) {
-        const wallet1 = accounts.get('wallet_1')!;
+        assertEquals(holding['value'], types.uint(5000000000000000));
+        assertEquals(holding['profit-loss'], types.int(0));
         
-        let block = chain.mineBlock([
-            Tx.contractCall('portfolio-tracker', 'create-portfolio', [
-                types.ascii("My Crypto Portfolio")
-            ], wallet1.address),
-            Tx.contractCall('portfolio-tracker', 'record-transaction', [
+        // Update price and check profit/loss
+        let updatePrice = chain.mineBlock([
+            Tx.contractCall('portfolio-tracker', 'update-asset-price', [
                 types.uint(1),
                 types.ascii("BTC"),
-                types.ascii("BUY"),
-                types.uint(100000000),
-                types.uint(50000000000)
+                types.uint(55000000000) // $55,000
             ], wallet1.address)
         ]);
         
-        block.receipts[0].result.expectOk();
-        block.receipts[1].result.expectOk();
+        updatePrice.receipts[0].result.expectOk();
         
-        let getTx = chain.mineBlock([
-            Tx.contractCall('portfolio-tracker', 'get-transaction', [
+        let updatedHolding = chain.mineBlock([
+            Tx.contractCall('portfolio-tracker', 'get-holding', [
                 types.uint(1),
-                types.uint(1)
+                types.ascii("BTC")
             ], wallet1.address)
         ]);
         
-        const tx = getTx.receipts[0].result.expectSome().expectTuple();
-        assertEquals(tx['asset'], types.ascii("BTC"));
-        assertEquals(tx['type'], types.ascii("BUY"));
-        assertEquals(tx['amount'], types.uint(100000000));
+        const newHolding = updatedHolding.receipts[0].result.expectSome().expectTuple();
+        assertEquals(newHolding['value'], types.uint(5500000000000000));
+        assertEquals(newHolding['profit-loss'], types.int(500000000000000));
     }
 });
