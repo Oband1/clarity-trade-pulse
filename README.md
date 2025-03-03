@@ -16,6 +16,9 @@ A blockchain-based cryptocurrency portfolio tracking system built on Stacks. Tra
 - Profit/Loss tracking per asset and portfolio
 - Performance analytics
 - Multi-user support with access controls
+- Enhanced portfolio diversity metrics
+- Risk assessment and scoring
+- Rate-limited price updates
 
 ## Portfolio Analytics
 - Real-time portfolio valuation
@@ -23,6 +26,8 @@ A blockchain-based cryptocurrency portfolio tracking system built on Stacks. Tra
 - Portfolio-wide performance metrics
 - Historical transaction analysis
 - Price change impact calculations
+- Portfolio diversity scoring
+- Concentration risk assessment
 
 ## Getting Started
 1. Clone the repository
@@ -34,3 +39,4 @@ A blockchain-based cryptocurrency portfolio tracking system built on Stacks. Tra
 - Track portfolio value changes automatically
 - Monitor profit/loss at both asset and portfolio levels
 - View historical performance through transaction records
+- Analyze portfolio diversity and risk metrics
