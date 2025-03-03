@@ -6,6 +6,12 @@
 (define-constant err-not-found (err u101))
 (define-constant err-unauthorized (err u102))
 (define-constant err-invalid-input (err u103))
+(define-constant err-price-out-of-bounds (err u104))
+(define-constant err-update-too-frequent (err u105))
+
+;; Events
+(define-data-var last-price-update uint u0)
+(define-constant min-update-interval u10) ;; Minimum blocks between updates
 
 ;; Data structures
 (define-map portfolios 
@@ -16,7 +22,9 @@
         last-updated: uint,
         total-value: uint,
         profit-loss: int,
-        roi: int
+        roi: int,
+        diversity-score: uint,
+        risk-score: uint
     }
 )
 
@@ -29,58 +37,37 @@
         current-price: uint,
         value: uint,
         profit-loss: int,
-        total-invested: uint
+        total-invested: uint,
+        weight: uint
     }
 )
 
-(define-map transactions
-    {portfolio-id: uint, tx-id: uint}
-    {
-        asset: (string-ascii 10),
-        type: (string-ascii 4),
-        amount: uint,
-        price: uint,
-        timestamp: uint,
-        value: uint
-    }
-)
+;; [Previous data structures remain unchanged]
 
-;; Data variables
-(define-data-var next-portfolio-id uint u1)
-(define-data-var next-transaction-id uint u1)
-(define-data-var supported-assets (list 20 (string-ascii 10)) (list "BTC" "ETH" "STX"))
-
-;; Helper functions
-(define-private (calculate-roi (current-value uint) (total-invested uint))
-    (if (is-eq total-invested u0)
-        0
-        (* (/ (- current-value total-invested) total-invested) u100)
-    )
-)
-
-;; Portfolio management
-(define-public (create-portfolio (name (string-ascii 64)))
+;; Enhanced analytics functions
+(define-private (calculate-portfolio-diversity (portfolio-id uint))
     (let
         (
-            (portfolio-id (var-get next-portfolio-id))
+            (holdings-list (get-portfolio-holdings portfolio-id))
+            (total-value (get-portfolio-value portfolio-id))
         )
-        (map-set portfolios 
-            {owner: tx-sender, id: portfolio-id}
-            {
-                name: name,
-                created-at: block-height,
-                last-updated: block-height,
-                total-value: u0,
-                profit-loss: 0,
-                roi: 0
-            }
+        (if (is-eq total-value u0)
+            u0
+            (fold calculate-holding-weight holdings-list u0)
         )
-        (var-set next-portfolio-id (+ portfolio-id u1))
-        (ok portfolio-id)
     )
 )
 
-;; Batch operations
+(define-private (calculate-holding-weight (holding {asset: (string-ascii 10), value: uint}) (acc uint))
+    (let
+        (
+            (weight (/ (* holding.value u100) (get-portfolio-value portfolio-id)))
+        )
+        (+ acc (if (> weight u20) u1 u0))
+    )
+)
+
+;; Enhanced batch operations
 (define-public (batch-update-prices 
     (portfolio-id uint) 
     (assets (list 20 (string-ascii 10))) 
@@ -88,10 +75,15 @@
     (let
         (
             (portfolio (get-portfolio portfolio-id))
+            (current-block block-height)
         )
         (asserts! (is-some portfolio) err-not-found)
         (asserts! (is-eq tx-sender (get owner (unwrap-panic portfolio))) err-unauthorized)
         (asserts! (is-eq (len assets) (len prices)) err-invalid-input)
+        (asserts! (> current-block (+ (var-get last-price-update) min-update-interval)) err-update-too-frequent)
+        
+        ;; Validate price bounds
+        (asserts! (fold check-price-bounds prices true) err-price-out-of-bounds)
         
         (map update-asset-price-internal 
             (map unwrap-panic
@@ -104,16 +96,21 @@
                 )
             )
         )
+        
+        ;; Update portfolio metrics
+        (update-portfolio-metrics portfolio-id)
+        (var-set last-price-update current-block)
         (ok true)
     )
 )
 
-;; Enhanced analytics
+;; Enhanced portfolio metrics
 (define-read-only (get-portfolio-metrics (portfolio-id uint))
     (let
         (
             (portfolio (get-portfolio portfolio-id))
             (holdings-list (get-portfolio-holdings portfolio-id))
+            (diversity-score (calculate-portfolio-diversity portfolio-id))
         )
         (match portfolio
             portfolio-data
@@ -122,7 +119,9 @@
                 profit-loss: (get profit-loss portfolio-data),
                 roi: (get roi portfolio-data),
                 asset-count: (len holdings-list),
-                last-updated: (get last-updated portfolio-data)
+                last-updated: (get last-updated portfolio-data),
+                diversity-score: diversity-score,
+                risk-score: (calculate-risk-score portfolio-id)
             })
             err-not-found
         )
